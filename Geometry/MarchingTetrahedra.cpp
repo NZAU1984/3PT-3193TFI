@@ -39,10 +39,23 @@ void MarchingTetrahedra::render( const QMatrix4x4& transformation, GLShader& sha
     // z: _nbCubes[2]
     ////////////////////////////////////////////////////
 
+    computeVertexInfo(implicitSurface);
+
     // Gather triangles
     _nbGLVertices = 0;
 
     // Rendu de chacun des cubes (i.e. remplissage de la liste des triangles)
+
+    for (unsigned int z = 0, zMax = _nbCubes[2]; z < zMax; ++z)
+    {
+        for (unsigned int y = 0, yMax = _nbCubes[1]; y <yMax; ++y)
+        {
+            for (unsigned int x = 0, xMax = _nbCubes[0]; x < xMax; ++x)
+            {
+                renderCube(x, y, z);
+            }
+        }
+    }
 
     // Send it to OpenGL
     renderTriangles( transformation, shader );
@@ -80,6 +93,19 @@ void MarchingTetrahedra::computeVertexInfo( ImplicitSurface& implicitSurface )
     // des boucles pour qu'elles correspondent bien à la
     // la fonction 'vertexIndex'.
     ////////////////////////////////////////////////////
+
+    for (unsigned int z = 0, zMax = _nbCubes[2]; z < zMax; ++z)
+    {
+        for (unsigned int y = 0, yMax = _nbCubes[1]; y <yMax; ++y)
+        {
+            for (unsigned int x = 0, xMax = _nbCubes[0]; x < xMax; ++x)
+            {
+                unsigned int index = vertexIndex(x, y, z);
+
+                implicitSurface.surfaceInfo(_vertexPositions[index], _vertexValues[index], _vertexNormals[index]);
+            }
+        }
+    }
 }
 
 void MarchingTetrahedra::renderCube( unsigned int x, unsigned int y, unsigned int z )
@@ -92,6 +118,41 @@ void MarchingTetrahedra::renderCube( unsigned int x, unsigned int y, unsigned in
     // pour le rendu de chacun d'eux. Il faut calculer l'index
     // de chaque sommet, et non leurs valeurs (x,y,z) entières.
     ////////////////////////////////////////////////////
+
+
+    /*   y: bottom
+        y1: top
+         x: left
+        x1: right
+         z: front
+        z1: rear */
+
+    unsigned int x1 = x + 1;
+    unsigned int y1 = y + 1;
+    unsigned int z1 = z + 1;
+
+    /* Bottom, left */
+    unsigned int bottomLeftFront    = vertexIndex(x, y, z);
+    unsigned int bottomLeftRear     = vertexIndex(x, y, z1);
+
+    /* Bottom, right */
+    unsigned int bottomRightFront   = vertexIndex(x1, y, z);
+    unsigned int bottomRightRear    = vertexIndex(x1, y, z1);
+
+    /* Top, left */
+    unsigned int topLeftFront   = vertexIndex(x, y1, z);
+    unsigned int topLeftRear    = vertexIndex(x, y1, z1);
+
+    /* Top, right */
+    unsigned int topRightFront  = vertexIndex(x1, y1, z);
+    unsigned int topRightRear   = vertexIndex(x1, y1, z1);
+
+    renderTetrahedron(bottomLeftFront,  topLeftFront,       topRightFront,      topRightRear);
+    renderTetrahedron(bottomLeftFront,  bottomRightFront,   topRightFront,      topRightRear);
+    renderTetrahedron(bottomLeftFront,  topLeftFront,       topLeftRear,        topRightRear);
+    renderTetrahedron(bottomLeftFront,  bottomLeftRear,     topLeftRear,        topRightRear);
+    renderTetrahedron(bottomLeftFront,  bottomLeftRear,     bottomRightRear,    topRightRear);
+    renderTetrahedron(bottomLeftFront,  bottomRightFront,   bottomRightRear,    topRightRear);
 }
 
 void MarchingTetrahedra::renderTetrahedron( unsigned int p1, unsigned int p2, unsigned int p3, unsigned int p4 )
@@ -109,6 +170,66 @@ void MarchingTetrahedra::renderTetrahedron( unsigned int p1, unsigned int p2, un
     // absolu de ce qui est à l'intérieur du liquide ou
     // à l'extérieur.
     ////////////////////////////////////////////////////
+
+    bool isVertex1Positive  = (_vertexValues[p1] >= 0);
+    bool isVertex2Positive  = (_vertexValues[p2] >= 0);
+    bool isVertex3Positive  = (_vertexValues[p3] >= 0);
+    bool isVertex4Positive  = (_vertexValues[p4] >= 0);
+
+    bool is1Not2    = (isVertex1Positive != isVertex2Positive);
+    bool is1Not3    = (isVertex1Positive != isVertex3Positive);
+    bool is1Not4    = (isVertex1Positive != isVertex4Positive);
+
+    bool is2Not3    = (isVertex2Positive != isVertex3Positive);
+    bool is2Not4    = (isVertex2Positive != isVertex4Positive);
+
+    bool is3Not4    = (isVertex3Positive != isVertex4Positive);
+
+
+    if(is1Not2 && is1Not3 && is1Not4)
+    {
+        /* 1 != 2 ; 1 != 3 ; 1 != 4*/
+
+        renderTriangle(p1, p2, p3, p4);
+    }
+    else if(is1Not2 && is2Not3 && is2Not4)
+    {
+        /* 2 != 1 ; 2 != 3 ; 2 != 4 */
+
+        renderTriangle(p2, p1, p3, p4);
+    }
+    else if(is1Not3 && is2Not3 && is3Not4)
+    {
+        /* 3 != 1 ; 3 != 2 ; 3 != 4 */
+
+        renderTriangle(p3, p1, p2, p4);
+    }
+    else if(is1Not4 && is2Not4 && is3Not4)
+    {
+        /* 4 != 1 ; 4 != 2 ; 4 != 3 */
+
+        renderTriangle(p4, p1, p2, p3);
+    }
+    else if((isVertex1Positive == isVertex2Positive) && is1Not3 && (isVertex3Positive == isVertex4Positive))
+    {
+        /* 1 == 2 ; 1 != 3 ; 3 == 4 */
+
+        renderQuad(p1, p2, p3, p4);
+    }
+    else if((isVertex1Positive == isVertex3Positive) && is1Not2 && (isVertex2Positive == isVertex4Positive))
+    {
+        /* 1 == 3 ; 1 != 2 ; 2 == 4 */
+
+        renderQuad(p1, p3, p2, p4);
+    }
+    else if((isVertex1Positive == isVertex4Positive) && is1Not2 && (isVertex2Positive == isVertex3Positive))
+    {
+        /* 1 == 4 ; 1 != 2 ; 2 == 3 */
+
+        renderQuad(p1, p4, p2, p3);
+    }
+
+    /* 1 == 2 == 3 == 4 => don't draw */
 }
 
 void MarchingTetrahedra::renderTriangle( unsigned int in1, unsigned int out2, unsigned int out3, unsigned int out4 )
@@ -124,6 +245,7 @@ void MarchingTetrahedra::renderTriangle( unsigned int in1, unsigned int out2, un
     // faudra l'ajouter à la liste des triangles affichés
     // en utilisant la méthode 'addTriangle'
     ////////////////////////////////////////////////////
+
 }
 
 void MarchingTetrahedra::renderQuad( unsigned int in1, unsigned int in2, unsigned int out3, unsigned int out4 )
