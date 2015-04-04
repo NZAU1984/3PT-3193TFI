@@ -278,8 +278,8 @@ void SPH::moveParticles( float deltaTime )
 
 void SPH::surfaceInfo( const QVector3D& position, float& value, QVector3D& normal )
 {
-    value = 0;
-    normal = QVector3D();
+    //value = 0;
+    //normal = QVector3D();
 
     ////////////////////////////////////////////////////
     // IFT3355 - À compléter
@@ -294,4 +294,50 @@ void SPH::surfaceInfo( const QVector3D& position, float& value, QVector3D& norma
     // et 'computeForces' pour savoir comment accéder aux
     // particules voisines.
     ////////////////////////////////////////////////////
+
+    //Initialisation des variables de densite
+       float density = 0;
+       float densityKernelGradientX = 0;
+       float densityKernelGradientY = 0;
+       float densityKernelGradientZ = 0;
+
+       //Get neighborhood
+       const QVector<unsigned int>& neighborhood = _grid.neighborhood(_grid.cellIndex(position));
+
+       // For each neighbor cell
+       for ( int j=0 ; j<neighborhood.size() ; ++j )
+       {
+           //Get particles of the cell
+           const QVector<unsigned int>& neighbors = _grid.cellParticles( neighborhood[j] );
+
+           // For each particle in a neighboring cell
+           for ( int k=0 ; k<neighbors.size() ; ++k )
+           {
+               const Particle& neighbor = _particles[neighbors[k]];
+               QVector3D difference = position - neighbor.position();
+               float r2 = difference.lengthSquared();
+
+               // If the neighboring particle is inside a sphere of radius 'h'
+               if ( r2 < _smoothingRadius2 )
+               {
+                   // Add density contribution
+                   density += densityKernel( r2 ) * neighbor.mass();
+
+                   // Calcul des composantes du gradient de f
+                   densityKernelGradientX +=(2*(position.x() - neighbor.position().x()))* densitykernelGradient(r2)*neighbor.mass();
+                   densityKernelGradientY +=(2*(position.y() - neighbor.position().y()))* densitykernelGradient(r2)*neighbor.mass();
+                   densityKernelGradientZ +=(2*(position.z() - neighbor.position().z()))*densitykernelGradient(r2)*neighbor.mass();
+
+               }
+           }
+       }
+
+       normal.setX(densityKernelGradientX/_restDensity); //Etant donne que cest une derivee on ne rajoute pas le "-(1-a)"
+       normal.setY(densityKernelGradientY/_restDensity);
+       normal.setZ(densityKernelGradientZ/_restDensity);
+
+       normal.normalize();
+       normal = -normal;
+       float a = 0.3;
+       value = density / _restDensity - (1 - a);
 }
