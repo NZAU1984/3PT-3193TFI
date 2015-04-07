@@ -48,7 +48,7 @@ void MarchingTetrahedra::render( const QMatrix4x4& transformation, GLShader& sha
 
     for (unsigned int z = 0, zMax = _nbCubes[2]; z < zMax; ++z)
     {
-        for (unsigned int y = 0, yMax = _nbCubes[1]; y <yMax; ++y)
+        for (unsigned int y = 0, yMax = _nbCubes[1]; y < yMax; ++y)
         {
             for (unsigned int x = 0, xMax = _nbCubes[0]; x < xMax; ++x)
             {
@@ -171,10 +171,10 @@ void MarchingTetrahedra::renderTetrahedron( unsigned int p1, unsigned int p2, un
     // à l'extérieur.
     ////////////////////////////////////////////////////
 
-    bool isVertex1Positive  = (_vertexValues[p1] >= 0);
-    bool isVertex2Positive  = (_vertexValues[p2] >= 0);
-    bool isVertex3Positive  = (_vertexValues[p3] >= 0);
-    bool isVertex4Positive  = (_vertexValues[p4] >= 0);
+    bool isVertex1Positive  = (_vertexValues[p1] > 0);
+    bool isVertex2Positive  = (_vertexValues[p2] > 0);
+    bool isVertex3Positive  = (_vertexValues[p3] > 0);
+    bool isVertex4Positive  = (_vertexValues[p4] > 0);
 
     bool is1Not2    = (isVertex1Positive != isVertex2Positive);
     bool is1Not3    = (isVertex1Positive != isVertex3Positive);
@@ -246,6 +246,24 @@ void MarchingTetrahedra::renderTriangle( unsigned int in1, unsigned int out2, un
     // en utilisant la méthode 'addTriangle'
     ////////////////////////////////////////////////////
 
+    QVector3D vectorIn   = _vertexPositions[in1];
+    QVector3D normalIn   = _vertexNormals[in1];
+    float valueIn        = _vertexValues[in1];
+
+    QVector3D point1    = interpolatePosition(vectorIn, _vertexPositions[out2], valueIn, _vertexValues[out2]);
+    QVector3D point2    = interpolatePosition(vectorIn, _vertexPositions[out3], valueIn, _vertexValues[out3]);
+    QVector3D point3    = interpolatePosition(vectorIn, _vertexPositions[out4], valueIn, _vertexValues[out4]);
+
+    QVector3D normal1    = interpolatePosition(normalIn, _vertexNormals[out2], valueIn, _vertexValues[out2]);
+    QVector3D normal2    = interpolatePosition(normalIn, _vertexNormals[out3], valueIn, _vertexValues[out3]);
+    QVector3D normal3    = interpolatePosition(normalIn, _vertexNormals[out4], valueIn, _vertexValues[out4]);
+
+    normal1.normalize();
+    normal2.normalize();
+    normal3.normalize();
+
+    addTriangle(point1, point2, point3, normal1, normal2, normal3);
+
 }
 
 void MarchingTetrahedra::renderQuad( unsigned int in1, unsigned int in2, unsigned int out3, unsigned int out4 )
@@ -259,6 +277,44 @@ void MarchingTetrahedra::renderQuad( unsigned int in1, unsigned int in2, unsigne
     // quadrilatère en deux triangles et les ajouter à
     // la liste avec 'addTriangle'.
     ////////////////////////////////////////////////////
+
+    QVector3D vectorIn1     = _vertexPositions[in1];
+    QVector3D vectorIn2     = _vertexPositions[in2];
+    QVector3D vectorOut3    = _vertexPositions[out3];
+    QVector3D vectorOut4    = _vertexPositions[out4];
+
+    QVector3D normalIn1     = _vertexNormals[in1];
+    QVector3D normalIn2     = _vertexNormals[in2];
+    QVector3D normalOut3    = _vertexNormals[out3];
+    QVector3D normalOut4    = _vertexNormals[out4];
+
+    float valueIn1  = _vertexValues[in1];
+    float valueIn2  = _vertexValues[in2];
+    float valueOut3 = _vertexValues[out3];
+    float valueOut4 = _vertexValues[out4];
+
+    QVector3D point1    = interpolatePosition(vectorIn1, vectorOut3, valueIn1, valueOut3);
+    QVector3D point2    = interpolatePosition(vectorIn1, vectorOut4, valueIn1, valueOut4);
+    QVector3D point3    = interpolatePosition(vectorIn2, vectorOut3, valueIn2, valueOut3);
+    QVector3D point4    = interpolatePosition(vectorIn2, vectorOut4, valueIn2, valueOut4);
+
+    QVector3D normal1    = interpolatePosition(normalIn1, normalOut3, valueIn1, valueOut3);
+    QVector3D normal2   = interpolatePosition(normalIn1, normalOut4, valueIn1, valueOut4);
+    QVector3D normal3    = interpolatePosition(normalIn2, normalOut3, valueIn2, valueOut3);
+    QVector3D normal4    = interpolatePosition(normalIn2, normalOut4, valueIn2, valueOut4);
+
+    normal1.normalize();
+    normal2.normalize();
+    normal3.normalize();
+    normal4.normalize();
+
+    addTriangle(point1, point2, point3, normal1, normal2, normal3);
+    addTriangle(point2, point3, point4, normal2, normal3, normal4);
+}
+
+QVector3D MarchingTetrahedra::interpolatePosition(const QVector3D& vector1, const QVector3D& vector2, const float& value1, const float& value2) const
+{
+    return vector1 + (value1 / (value1 - value2)) * (vector2 - vector1);
 }
 
 QVector3D MarchingTetrahedra::vertexPosition( unsigned int x, unsigned int y, unsigned int z ) const

@@ -274,13 +274,64 @@ void SPH::moveParticles( float deltaTime )
     // les méthodes 'removeParticle' et 'addParticle' et
     // mettez à jour son index.
     ////////////////////////////////////////////////////
+
+    QVector3D newVelocity, newPosition;
+
+        for(int i =0; i<_particles.size(); i++) {
+            //Calcul nouvelle vélocité et nouvelle position
+            newVelocity = _particles[i].velocity() + deltaTime * _particles[i].acceleration();
+            newPosition = _particles[i].position() + deltaTime * newVelocity;
+
+            //Intersection avec la paroi ?
+            QVector3D totalMovement = newPosition - _particles[i].position();
+            QVector3D leftMovement = totalMovement;
+
+            Intersection intersection;
+            QVector3D normale;
+            QVector3D tmpPosition = _particles[i].position();
+            QVector3D direction = totalMovement.normalized();
+            Ray ray = Ray(tmpPosition, direction);
+
+            //Tant qu'il y a une intersection entre la direction et le container, avant que la particule atteigne sa position finale
+            while(_container.intersect(ray, intersection) && (direction*intersection.rayParameterT()).length() < leftMovement.length()) {
+
+                //Nouvelle position avant prochain mouvement
+                tmpPosition = intersection.position();
+                //Mouvement restant à effectuer
+                leftMovement = newPosition - tmpPosition;
+
+                //Si intersection, le mouvement total effectué à changé
+                normale = intersection.normal();
+                totalMovement = leftMovement - QVector3D::dotProduct(leftMovement, normale) * normale;
+
+                //Correction de la nouvelle vélocité et de la nouvelle position
+                newVelocity -= QVector3D::dotProduct(newVelocity, normale) * normale;
+                tmpPosition = tmpPosition - normale*0.0002; //Sinon boucle infinie, il faut décaler la particule tant qu'elle n'atteint pas la destination finale
+                newPosition = tmpPosition + totalMovement;
+
+                //On remet à jour la direction, on relance le rayon pour voir si il y a à nouveau une intersection avant la position finale
+                direction = totalMovement.normalized();
+                ray = Ray(tmpPosition, direction);
+            }
+
+            //Ici, la position a normalement atteint sa position finale.
+            _particles[i].setVelocity(newVelocity);
+            _particles[i].setPosition(newPosition);
+
+            //Puis on change la cellule si besoin
+            unsigned int cell = _particles[i].cellIndex();
+            unsigned int newCell = _grid.cellIndex(newPosition);
+            if (cell != newCell)
+            {
+                _particles[i].setCellIndex(newCell);
+                _grid.removeParticle(cell, i);
+                _grid.addParticle(newCell, i);
+            }
+        }
 }
 
 void SPH::surfaceInfo( const QVector3D& position, float& value, QVector3D& normal )
 {
-    //value = 0;
-    //normal = QVector3D();
-
     ////////////////////////////////////////////////////
     // IFT3355 - À compléter
     //
@@ -295,49 +346,95 @@ void SPH::surfaceInfo( const QVector3D& position, float& value, QVector3D& norma
     // particules voisines.
     ////////////////////////////////////////////////////
 
-    //Initialisation des variables de densite
-       float density = 0;
-       float densityKernelGradientX = 0;
-       float densityKernelGradientY = 0;
-       float densityKernelGradientZ = 0;
+    /* These variables will be incremented with values calculated based on nearby particles. */
+    float density   = 0;
+    float gradientX = 0;
+    float gradientY = 0;
+    float gradientZ = 0;
 
-       //Get neighborhood
-       const QVector<unsigned int>& neighborhood = _grid.neighborhood(_grid.cellIndex(position));
+    const float& positionX  = position.x();
+    const float& positionY  = position.y();
+    const float& positionZ  = position.z();
 
-       // For each neighbor cell
-       for ( int j=0 ; j<neighborhood.size() ; ++j )
-       {
-           //Get particles of the cell
-           const QVector<unsigned int>& neighbors = _grid.cellParticles( neighborhood[j] );
+    const QVector<unsigned int>& cells = _grid.neighborhood(_grid.cellIndex(position));
 
-           // For each particle in a neighboring cell
-           for ( int k=0 ; k<neighbors.size() ; ++k )
-           {
-               const Particle& neighbor = _particles[neighbors[k]];
-               QVector3D difference = position - neighbor.position();
-               float r2 = difference.lengthSquared();
+    /* Let's loop through nearby cells. */
+    for (unsigned int cellId = 0, cellMax = cells.size(); cellId < cellMax; ++cellId)
+    {
+        const QVector<unsigned int>& cellParticles = _grid.cellParticles(cells[cellId]);
 
-               // If the neighboring particle is inside a sphere of radius 'h'
-               if ( r2 < _smoothingRadius2 )
-               {
-                   // Add density contribution
-                   density += densityKernel( r2 ) * neighbor.mass();
+        /* Let's loop through particles in the current nearby cell. */
+        for (unsigned int particleId = 0, particleIdMax = cellParticles.size(); particleId < particleIdMax; ++particleId)
+        {
+            const Particle&  particle           = _particles[cellParticles[particleId]];
+            const QVector3D& particlePosition   = particle.position();
+            const float&     particleMass       = particle.mass();
+            float            squaredDistance    = (position - particlePosition).lengthSquared();
 
-                   // Calcul des composantes du gradient de f
-                   densityKernelGradientX +=(2*(position.x() - neighbor.position().x()))* densitykernelGradient(r2)*neighbor.mass();
-                   densityKernelGradientY +=(2*(position.y() - neighbor.position().y()))* densitykernelGradient(r2)*neighbor.mass();
-                   densityKernelGradientZ +=(2*(position.z() - neighbor.position().z()))*densitykernelGradient(r2)*neighbor.mass();
+            if (squaredDistance < _smoothingRadius2)
+            {
+                /* Nearby particle is inside radius, let's adjust density and normal components. */
 
-               }
-           }
-       }
+                density += particleMass * densityKernel(squaredDistance);
 
-       normal.setX(densityKernelGradientX/_restDensity); //Etant donne que cest une derivee on ne rajoute pas le "-(1-a)"
-       normal.setY(densityKernelGradientY/_restDensity);
-       normal.setZ(densityKernelGradientZ/_restDensity);
+                /* Let's calculate the gradient. We have to calculate the derivative of the
+                 * density for x/y/z components separately.
+                 *
+                 * We defined the implicit function as f(p) = P(p)/P0 - (1 - a) where P is
+                 * the density function and P0 is the resting density.
+                 *
+                 * The gradient of f, noted \/f, is (df/dx, df/dy, df/dz) where 'd' should be
+                 * seen as the Greek letter delta to represent a partial derivative. Let's now
+                 * work only with 'x' to simplify. Also, we'll forget about the summation to
+                 * focus on a single nearby particle. Let's not forget that the derivative of a
+                 * summation is a summation of derivates.
+                 *
+                 * The derivative of 'f' for one nearby particle becomes:
+                 *     df/dx = d[(1/P0) * m * W((p - pi)^2) - (1 - a)]/dx
+                 *         where 'm' is the mass of the nearby particle, 'p' is the position passed
+                 *         to the method and 'pi' is the position of the nearby particle.
+                 *
+                 *     Let's rewrite 'p - pi':
+                 *     df/dx = d[(1/P0) * m * W((x - xi)^2 + (y - yi)^2 + (z - zi)^2) - (1 - a)]/dx
+                 *         where 'x', 'y', 'z' are components of the position passed to the method
+                 *         and 'xi', 'yi', 'zi' are components of the nearby particle position.
+                 *
+                 *     Let's apply derivative rules:
+                 *     df/dx = d[(1/P0) * m * W((x - xi)^2 + (y - yi)^2 + (z - zi)^2)]/dx - d[(1 - a)]/dx
+                 *           = d[(1/P0) * m * W((x - xi)^2 + (y - yi)^2 + (z - zi)^2)]/dx - 0
+                 *           = d[(1/P0) * m * W((x - xi)^2 + (y - yi)^2 + (z - zi)^2)]/dx
+                 *           = (1/P0) * m * d[W((x - xi)^2 + (y - yi)^2 + (z - zi)^2)]/dx
+                 *
+                 *     Here, we can apply the chain rule: f(g(x)) = f'(g(x)) * g'(x)
+                 *         - 'f(...)' = 'W(...)'
+                 *         - 'g(x)'   = (x - xi)^2 + (y - yi)^2 + (z - zi)^2
+                 *
+                 *     We already have W'(...), it's densitykernelGradient()
+                 *
+                 *     So we get:
+                 *           densitykernelGradient((x - xi)^2 + (y - yi)^2 + (z - zi)^2) * g'(x)
+                 *           = densitykernelGradient((x - xi)^2 + (y - yi)^2 + (z - zi)^2) * 2 * (x - xi)
+                 *           (because '(y - yi)^2 + (z - zi)^2' is considered as a constant and its
+                 *           derivative is 0)
+                 *
+                 *     Finally:
+                 *     df/dx = (1/P0) * m * densitykernelGradient((x - xi)^2 + (y - yi)^2 + (z - zi)^2) * 2 * (x - xi)
+                 */
+                float common = particleMass * densitykernelGradient(squaredDistance);
+                gradientX    -= 2 * (positionX - particlePosition.x()) * common;
+                gradientY    -= 2 * (positionY - particlePosition.y()) * common;
+                gradientZ    -= 2 * (positionZ - particlePosition.z()) * common;
+            }
+        }
+    }
 
-       normal.normalize();
-       normal = -normal;
-       float a = 0.3;
-       value = density / _restDensity - (1 - a);
+    /* We take (1/P0) out of the summation and do it here. */
+    normal.setX(gradientX / _restDensity);
+    normal.setY(gradientY / _restDensity);
+    normal.setZ(gradientZ / _restDensity);
+
+    normal.normalize();
+
+    float a = 0.3;
+    value   = density / _restDensity - (1 - a);
 }
