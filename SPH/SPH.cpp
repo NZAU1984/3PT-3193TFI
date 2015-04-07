@@ -275,59 +275,70 @@ void SPH::moveParticles( float deltaTime )
     // mettez à jour son index.
     ////////////////////////////////////////////////////
 
-    QVector3D newVelocity, newPosition;
+    for(unsigned int particleId = 0, particleIdMax = _particles.size(); particleId < particleIdMax; ++particleId)
+    {
+        Particle& particle          = _particles[particleId];
+        QVector3D currentPosition   = particle.position();
+        QVector3D nextSpeed         = particle.velocity() + (deltaTime * particle.acceleration());
+        QVector3D nextPosition      = currentPosition + (deltaTime * nextSpeed);
 
-        for(int i =0; i<_particles.size(); i++) {
-            //Calcul nouvelle vélocité et nouvelle position
-            newVelocity = _particles[i].velocity() + deltaTime * _particles[i].acceleration();
-            newPosition = _particles[i].position() + deltaTime * newVelocity;
+       /* Below, we'll check for collision with container. */
 
-            //Intersection avec la paroi ?
-            QVector3D totalMovement = newPosition - _particles[i].position();
-            QVector3D leftMovement = totalMovement;
+        QVector3D totalDisplacement     = nextPosition - currentPosition;
+        QVector3D remainingDisplacement = totalDisplacement;
 
-            Intersection intersection;
-            QVector3D normale;
-            QVector3D tmpPosition = _particles[i].position();
-            QVector3D direction = totalMovement.normalized();
-            Ray ray = Ray(tmpPosition, direction);
+        Intersection collisionDetectionIntersection;
+        QVector3D collisionDetectionNormal;
+        QVector3D collisionDetectionPosition    = currentPosition;
+        QVector3D collisionDetectionDirection   = totalDisplacement.normalized();
+        Ray       collisionDetectionRay(collisionDetectionPosition, collisionDetectionDirection);
 
-            //Tant qu'il y a une intersection entre la direction et le container, avant que la particule atteigne sa position finale
-            while(_container.intersect(ray, intersection) && (direction*intersection.rayParameterT()).length() < leftMovement.length()) {
-
-                //Nouvelle position avant prochain mouvement
-                tmpPosition = intersection.position();
-                //Mouvement restant à effectuer
-                leftMovement = newPosition - tmpPosition;
-
-                //Si intersection, le mouvement total effectué à changé
-                normale = intersection.normal();
-                totalMovement = leftMovement - QVector3D::dotProduct(leftMovement, normale) * normale;
-
-                //Correction de la nouvelle vélocité et de la nouvelle position
-                newVelocity -= QVector3D::dotProduct(newVelocity, normale) * normale;
-                tmpPosition = tmpPosition - normale*0.0002; //Sinon boucle infinie, il faut décaler la particule tant qu'elle n'atteint pas la destination finale
-                newPosition = tmpPosition + totalMovement;
-
-                //On remet à jour la direction, on relance le rayon pour voir si il y a à nouveau une intersection avant la position finale
-                direction = totalMovement.normalized();
-                ray = Ray(tmpPosition, direction);
-            }
-
-            //Ici, la position a normalement atteint sa position finale.
-            _particles[i].setVelocity(newVelocity);
-            _particles[i].setPosition(newPosition);
-
-            //Puis on change la cellule si besoin
-            unsigned int cell = _particles[i].cellIndex();
-            unsigned int newCell = _grid.cellIndex(newPosition);
-            if (cell != newCell)
+        while(_container.intersect(collisionDetectionRay, collisionDetectionIntersection))
+        {
+            if((collisionDetectionDirection * collisionDetectionIntersection.rayParameterT()).length() >= remainingDisplacement.length())
             {
-                _particles[i].setCellIndex(newCell);
-                _grid.removeParticle(cell, i);
-                _grid.addParticle(newCell, i);
+                /* If the collision is further away than the new position, let's break, otherwise we'll get in an endless loop. */
+
+                break;
             }
+
+            collisionDetectionPosition  = collisionDetectionIntersection.position();
+            collisionDetectionNormal    = collisionDetectionIntersection.normal();
+
+            /* Let's remove the displacement inside the container. */
+            remainingDisplacement       = nextPosition - collisionDetectionPosition;
+
+            /* Let's remove the component in the direction of the collision. */
+            totalDisplacement           = remainingDisplacement
+                - (QVector3D::dotProduct(remainingDisplacement, collisionDetectionNormal) * collisionDetectionNormal);
+            nextSpeed                  -= QVector3D::dotProduct(nextSpeed, collisionDetectionNormal) * collisionDetectionNormal;
+
+            /* Let's move a tiny bit away from the edge (epsilon). */
+            collisionDetectionPosition -= collisionDetectionNormal * 0.0003;
+
+            nextPosition                = collisionDetectionPosition + totalDisplacement;
+
+            /* Let's update variables for collision detection. */
+            collisionDetectionDirection = totalDisplacement.normalized();
+            collisionDetectionRay       = Ray(collisionDetectionPosition, collisionDetectionDirection);
         }
+
+        /* Let's update speed and position. */
+        particle.setVelocity(nextSpeed);
+        particle.setPosition(nextPosition);
+
+        /* Let's update cell if required. */
+        unsigned int currentCellId  = particle.cellIndex();
+        unsigned int nextCellId     = _grid.cellIndex(nextPosition);
+
+        if (currentCellId != nextCellId)
+        {
+            particle.setCellIndex(nextCellId);
+
+            _grid.removeParticle(currentCellId, particleId);
+            _grid.addParticle(nextCellId, particleId);
+        }
+    }
 }
 
 void SPH::surfaceInfo( const QVector3D& position, float& value, QVector3D& normal )
@@ -352,9 +363,9 @@ void SPH::surfaceInfo( const QVector3D& position, float& value, QVector3D& norma
     float gradientY = 0;
     float gradientZ = 0;
 
-    const float& positionX  = position.x();
-    const float& positionY  = position.y();
-    const float& positionZ  = position.z();
+    float positionX  = position.x();
+    float positionY  = position.y();
+    float positionZ  = position.z();
 
     const QVector<unsigned int>& cells = _grid.neighborhood(_grid.cellIndex(position));
 
@@ -368,7 +379,7 @@ void SPH::surfaceInfo( const QVector3D& position, float& value, QVector3D& norma
         {
             const Particle&  particle           = _particles[cellParticles[particleId]];
             const QVector3D& particlePosition   = particle.position();
-            const float&     particleMass       = particle.mass();
+            float            particleMass       = particle.mass();
             float            squaredDistance    = (position - particlePosition).lengthSquared();
 
             if (squaredDistance < _smoothingRadius2)

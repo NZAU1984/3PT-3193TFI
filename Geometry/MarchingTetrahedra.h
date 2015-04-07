@@ -27,7 +27,7 @@ private:
     void renderQuad( unsigned int in1, unsigned int in2, unsigned int out3, unsigned int out4 );
 
     //
-    QVector3D interpolatePosition(const QVector3D& vector1, const QVector3D& vector2, const float& value1, const float& value2) const;
+    QVector3D interpolatePosition(const QVector3D& vector1, const QVector3D& vector2, float value1, float value2) const;
     //
     QVector3D vertexPosition( unsigned int x, unsigned int y, unsigned int z ) const;
     unsigned int vertexIndex( unsigned int x, unsigned int y, unsigned int z ) const;

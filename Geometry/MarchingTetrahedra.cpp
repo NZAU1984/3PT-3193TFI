@@ -312,7 +312,7 @@ void MarchingTetrahedra::renderQuad( unsigned int in1, unsigned int in2, unsigne
     addTriangle(point2, point3, point4, normal2, normal3, normal4);
 }
 
-QVector3D MarchingTetrahedra::interpolatePosition(const QVector3D& vector1, const QVector3D& vector2, const float& value1, const float& value2) const
+QVector3D MarchingTetrahedra::interpolatePosition(const QVector3D& vector1, const QVector3D& vector2, float value1, float value2) const
 {
     return vector1 + (value1 / (value1 - value2)) * (vector2 - vector1);
 }
