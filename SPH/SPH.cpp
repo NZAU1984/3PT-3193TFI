@@ -431,10 +431,10 @@ void SPH::surfaceInfo( const QVector3D& position, float& value, QVector3D& norma
                  *     Finally:
                  *     df/dx = (1/P0) * m * densitykernelGradient((x - xi)^2 + (y - yi)^2 + (z - zi)^2) * 2 * (x - xi)
                  */
-                float common = particleMass * densitykernelGradient(squaredDistance);
-                gradientX    -= 2 * (positionX - particlePosition.x()) * common;
-                gradientY    -= 2 * (positionY - particlePosition.y()) * common;
-                gradientZ    -= 2 * (positionZ - particlePosition.z()) * common;
+                float common    = particleMass * densitykernelGradient(squaredDistance);
+                gradientX      -= 2 * (positionX - particlePosition.x()) * common;
+                gradientY      -= 2 * (positionY - particlePosition.y()) * common;
+                gradientZ      -= 2 * (positionZ - particlePosition.z()) * common;
             }
         }
     }

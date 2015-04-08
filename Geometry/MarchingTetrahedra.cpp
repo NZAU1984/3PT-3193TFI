@@ -41,10 +41,7 @@ void MarchingTetrahedra::render( const QMatrix4x4& transformation, GLShader& sha
 
     computeVertexInfo(implicitSurface);
 
-    // Gather triangles
     _nbGLVertices = 0;
-
-    // Rendu de chacun des cubes (i.e. remplissage de la liste des triangles)
 
     for (unsigned int z = 0, zMax = _nbCubes[2]; z < zMax; ++z)
     {
@@ -52,12 +49,13 @@ void MarchingTetrahedra::render( const QMatrix4x4& transformation, GLShader& sha
         {
             for (unsigned int x = 0, xMax = _nbCubes[0]; x < xMax; ++x)
             {
+                /* Let's render each triangle. */
+
                 renderCube(x, y, z);
             }
         }
     }
 
-    // Send it to OpenGL
     renderTriangles( transformation, shader );
 }
 
@@ -147,6 +145,7 @@ void MarchingTetrahedra::renderCube( unsigned int x, unsigned int y, unsigned in
     unsigned int topRightFront  = vertexIndex(x1, y1, z);
     unsigned int topRightRear   = vertexIndex(x1, y1, z1);
 
+    /* Let's divide the cube in 6 tetrahedons. 'bottomLeftFront' and 'topRightRear' are common to all 6 tetrahedrons. */
     renderTetrahedron(bottomLeftFront,  topLeftFront,       topRightFront,      topRightRear);
     renderTetrahedron(bottomLeftFront,  bottomRightFront,   topRightFront,      topRightRear);
     renderTetrahedron(bottomLeftFront,  topLeftFront,       topLeftRear,        topRightRear);
@@ -171,11 +170,16 @@ void MarchingTetrahedra::renderTetrahedron( unsigned int p1, unsigned int p2, un
     // à l'extérieur.
     ////////////////////////////////////////////////////
 
+    /* Below, we'll check signs. We'll use boolean to express the sign of a variable:
+     *     - true if > 0
+     *     - false otherwise */
     bool isVertex1Positive  = (_vertexValues[p1] > 0);
     bool isVertex2Positive  = (_vertexValues[p2] > 0);
     bool isVertex3Positive  = (_vertexValues[p3] > 0);
     bool isVertex4Positive  = (_vertexValues[p4] > 0);
 
+    /* Let's create some variables which appear more than once in 'if' conditions below. Please note
+     * that we do not need to create variables like 'is2Not1' because it is the same as 'is1Not2'. */
     bool is1Not2    = (isVertex1Positive != isVertex2Positive);
     bool is1Not3    = (isVertex1Positive != isVertex3Positive);
     bool is1Not4    = (isVertex1Positive != isVertex4Positive);
@@ -185,7 +189,7 @@ void MarchingTetrahedra::renderTetrahedron( unsigned int p1, unsigned int p2, un
 
     bool is3Not4    = (isVertex3Positive != isVertex4Positive);
 
-
+    /* The four next 'if' are for tetrahedrons: if one sign if different from three ofther signs. */
     if(is1Not2 && is1Not3 && is1Not4)
     {
         /* 1 != 2 ; 1 != 3 ; 1 != 4*/
@@ -210,6 +214,9 @@ void MarchingTetrahedra::renderTetrahedron( unsigned int p1, unsigned int p2, un
 
         renderTriangle(p4, p1, p2, p3);
     }
+
+    /* Now we check if two signs are different from the remaining two other signs. If so, we create a "quad". */
+
     else if((isVertex1Positive == isVertex2Positive) && is1Not3 && (isVertex3Positive == isVertex4Positive))
     {
         /* 1 == 2 ; 1 != 3 ; 3 == 4 */
@@ -249,6 +256,8 @@ void MarchingTetrahedra::renderTriangle( unsigned int in1, unsigned int out2, un
     QVector3D vectorIn   = _vertexPositions[in1];
     QVector3D normalIn   = _vertexNormals[in1];
     float valueIn        = _vertexValues[in1];
+
+    /* Below, we interpolate vectors and normals accordings to the implicite surface values at specified vertices. */
 
     QVector3D point1    = interpolatePosition(vectorIn, _vertexPositions[out2], valueIn, _vertexValues[out2]);
     QVector3D point2    = interpolatePosition(vectorIn, _vertexPositions[out3], valueIn, _vertexValues[out3]);
@@ -293,6 +302,8 @@ void MarchingTetrahedra::renderQuad( unsigned int in1, unsigned int in2, unsigne
     float valueOut3 = _vertexValues[out3];
     float valueOut4 = _vertexValues[out4];
 
+    /* Below, we interpolate vectors and normals accordings to the implicite surface values at specified vertices. */
+
     QVector3D point1    = interpolatePosition(vectorIn1, vectorOut3, valueIn1, valueOut3);
     QVector3D point2    = interpolatePosition(vectorIn1, vectorOut4, valueIn1, valueOut4);
     QVector3D point3    = interpolatePosition(vectorIn2, vectorOut3, valueIn2, valueOut3);
@@ -308,12 +319,39 @@ void MarchingTetrahedra::renderQuad( unsigned int in1, unsigned int in2, unsigne
     normal3.normalize();
     normal4.normalize();
 
+    /* Let's split the "quad" into two triangles. */
+
     addTriangle(point1, point2, point3, normal1, normal2, normal3);
     addTriangle(point2, point3, point4, normal2, normal3, normal4);
 }
 
 QVector3D MarchingTetrahedra::interpolatePosition(const QVector3D& vector1, const QVector3D& vector2, float value1, float value2) const
 {
+    /* Here we approximate the point between 'vector1' and 'vector2' where the implicit surface value would be zero.
+     *
+     * Let's only use 'x' coordinates for an example.
+     *
+     * Let's say vector1 is at x=4 and vector2 is a x=-9.
+     * Let's also say that value1=-1 and value2=5
+     *
+     * We have deltaX = vector2 - vector1 = -9 - 4 = - 13
+     * We have deltaValue = value1 - value2 = -1 - 5 = -6
+     *
+     * If we substract value1 to itself, we necessarily get value=0. So that's why we use it in the denomiator of the fraction below.
+     *
+     * We must be careful with signs as we must go from somewhere between vector1 and vector2. By using 'vector2 - vector1' for deltaX
+     * and 'value1 - value2' (and not 'value2 - value1') for deltaValue, we either get +/+ or -/- with only returns a positive number.
+     * Then only deltaX is responsible to add a positive value or a negative value (subtraction).
+     *
+     * Let's take out example: value1 / deltaValue = -1/-6 = 1/6 (positive)
+     * We now that we must go from x=4 to somewhere between that point and x=-9, so we must multiply the fraction above (1/6) to something
+     * negative. Here, deltaX = -13 is negative, so problem solved.
+     *
+     * If signs were reversed, we would get deltaX = 9 - (-4) = 13 and deltaValue = 1 - (-5) = 6 (both were negative, both are now positive).
+     * So we get -4 + (1 / 6) * 13, so we go from x=-4 to somewhere between that point and x=9.
+     *
+     * Without demonstrating it, the same thing happens if values and/or vector coordinates have the same sign. */
+
     return vector1 + (value1 / (value1 - value2)) * (vector2 - vector1);
 }
 
